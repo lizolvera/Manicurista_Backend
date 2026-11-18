@@ -14,8 +14,8 @@ export interface Appointment {
   date: string;
   time: string;
   service: string;
-  duration: number;
-  buffer: number;
+  duration: number;  // Duración en HORAS (ej: 1.5 = 1 hora y 30 minutos)
+  buffer: number;    // Tiempo de preparación en MINUTOS
   deposit: number;
   balancePaid: number;
   attendance: Attendance;
@@ -33,8 +33,8 @@ export interface Service {
   id: string;
   name: string;
   basePrice: number;
-  duration: number;
-  buffer: number;
+  duration: number;  // Duración en HORAS (ej: 1.5 = 1 hora y 30 minutos)
+  buffer: number;    // Tiempo de preparación en MINUTOS
   active: boolean;
   createdAt?: string;
 }
@@ -78,8 +78,8 @@ export function localDate(d = new Date()): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 export function endTime(a: Appointment): string {
-  const end = minutes(a.time) + a.duration + a.buffer;
-  return `${String(Math.floor(end / 60)).padStart(2, '0')}:${String(end % 60).padStart(2, '0')}`;
+  const totalMinutes = minutes(a.time) + (a.duration * 60) + a.buffer;
+  return `${String(Math.floor(totalMinutes / 60)).padStart(2, '0')}:${String(totalMinutes % 60).padStart(2, '0')}`;
 }
 export function conflicts(candidate: Appointment, all: Appointment[]): boolean {
   return all.some(
@@ -112,14 +112,14 @@ export function validateAppointment(a: Appointment): string {
   if (typeof a.time !== 'string' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(a.time))
     return 'Selecciona una hora válida.';
   if (
-    !Number.isInteger(a.duration) ||
-    a.duration < 15 ||
-    a.duration > 480 ||
+    typeof a.duration !== 'number' ||
+    a.duration <= 0 ||
+    a.duration > 8 ||
     !Number.isInteger(a.buffer) ||
     a.buffer < 0 ||
     a.buffer > 120
   )
-    return 'Revisa la duración (15–480 min) y preparación (0–120 min).';
+    return 'Revisa la duración (0.25–8 horas) y preparación (0–120 min).';
   if (minutes(a.time) < 420 || minutes(a.time) + a.duration + a.buffer > 1260)
     return 'La cita y su preparación deben quedar entre las 07:00 y las 21:00.';
   if (!isMoney(a.totalPrice))

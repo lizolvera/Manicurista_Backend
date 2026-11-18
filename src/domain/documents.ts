@@ -24,8 +24,8 @@ export interface ServiceDocument {
   _id: string;
   name: string;
   basePrice: number;
-  duration: number;
-  buffer: number;
+  duration: number;  // Duración en HORAS (ej: 1.5 = 1 hora y 30 minutos)
+  buffer: number;    // Tiempo de preparación en MINUTOS
   active: boolean;
   createdAt: string;
 }
@@ -36,8 +36,8 @@ export interface AppointmentDocument {
   serviceId: string;
   date: string;
   time: string;
-  duration: number;
-  buffer: number;
+  duration: number;  // Duración en HORAS (ej: 1.5 = 1 hora y 30 minutos)
+  buffer: number;    // Tiempo de preparación en MINUTOS
   totalPrice: number;
   deposit: number;
   balancePaid: number;

@@ -28,11 +28,12 @@ const appointment = (changes: Partial<Appointment> = {}): Appointment => ({
   manicurist: 'Manicurista 1',
   manicuristId: 'manicurista-001',
   serviceId: 'servicio-001',
+  timeId: 'tiempo-001',
   totalPrice: 2000,
   date: '2026-11-10',
   time: '09:00',
   service: 'Manicura',
-  duration: 45,
+  duration: 1.5,
   buffer: 15,
   deposit: 100,
   balancePaid: 0,
@@ -65,7 +66,16 @@ const empty = (): AgendaState => ({
       id: 'servicio-001',
       name: 'Manicura',
       basePrice: 350,
-      duration: 45,
+      defaultTimeId: 'tiempo-001',
+      active: true,
+      createdAt: '2026-11-09T18:00:00Z',
+    },
+  ],
+  times: [
+    {
+      id: 'tiempo-001',
+      label: '1 hora y media',
+      duration: 1.5,
       buffer: 15,
       active: true,
       createdAt: '2026-11-09T18:00:00Z',
@@ -181,7 +191,7 @@ test('el repositorio persiste por colección, conserva agenda y revierte una ope
   ]);
 });
 
-test('lee los seis ejemplos manuales y escribe exactamente sus campos de Atlas', () => {
+test('lee los siete ejemplos manuales y escribe exactamente sus campos de Atlas', () => {
   let state = fromDocuments(examples());
   assert.equal(state.appointments[0].client, 'C01 Prueba');
   assert.equal(state.appointments[0].manicurist, 'Manicurista 1');
@@ -268,9 +278,16 @@ test('el catálogo conserva el precio acordado y rechaza nuevas asignaciones ina
   const before = { ...state.appointments[0] };
   state = apply(state, {
     action: 'save-service',
-    payload: { ...state.services[0], basePrice: 500, duration: 120 },
+    payload: { ...state.services[0], basePrice: 500 },
   });
   assert.equal(state.appointments[0].totalPrice, before.totalPrice);
+  assert.equal(state.appointments[0].duration, before.duration);
+  // Editar el catálogo de tiempos tampoco reescribe la instantánea de la cita.
+  state = apply(state, {
+    action: 'save-time',
+    payload: { ...state.times[0], duration: 2 },
+  });
+  assert.equal(state.times[0].duration, 2);
   assert.equal(state.appointments[0].duration, before.duration);
   state = apply(state, {
     action: 'save-manicurist',
@@ -324,7 +341,12 @@ test('backend valida profesional, duración y conflictos por manicurista', () =>
     /manicurista/,
   );
   assert.throws(
-    () => apply(state, { action: 'save', payload: appointment({ id: 'a2', duration: -1 }) }),
+    () => apply(state, { action: 'save', payload: appointment({ id: 'a2', timeId: 'missing' }) }),
+    /duración/,
+  );
+  assert.throws(
+    () =>
+      apply(state, { action: 'save', payload: appointment({ id: 'a2', timeId: '', duration: -1 }) }),
     /duración/,
   );
   assert.equal(
@@ -333,6 +355,41 @@ test('backend valida profesional, duración y conflictos por manicurista', () =>
       state.appointments,
     ),
     false,
+  );
+});
+
+test('el catálogo de tiempos alimenta la instantánea de la cita', () => {
+  let state = empty();
+  state = apply(state, {
+    action: 'save-time',
+    payload: { id: 'tiempo-002', label: '2 horas', duration: 2, buffer: 10, active: true },
+  });
+  assert.equal(state.times.length, 2);
+  state = apply(state, { action: 'save', payload: appointment({ timeId: 'tiempo-002' }) });
+  assert.equal(state.appointments[0].timeId, 'tiempo-002');
+  assert.equal(state.appointments[0].duration, 2); // duración tomada del catálogo
+  assert.equal(state.appointments[0].buffer, 15); // preparación variable: se toma del formulario
+  state = apply(state, {
+    action: 'save',
+    payload: appointment({ id: 'a2', timeId: 'tiempo-002', buffer: 30, time: '12:00' }),
+  });
+  assert.equal(state.appointments[1].duration, 2);
+  assert.equal(state.appointments[1].buffer, 30);
+  assert.throws(
+    () =>
+      apply(state, {
+        action: 'save-time',
+        payload: { id: 'tiempo-003', label: 'Otra', duration: 2, buffer: 10, active: true },
+      }),
+    /Ya existe un tiempo/,
+  );
+  assert.throws(
+    () =>
+      apply(state, {
+        action: 'save-service',
+        payload: { ...state.services[0], id: 'servicio-002', name: 'Gel', defaultTimeId: 'missing' },
+      }),
+    /tiempo/,
   );
 });
 

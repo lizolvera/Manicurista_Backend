@@ -6,6 +6,7 @@ import type {
   Manicurist,
   Notice,
   Service,
+  ServiceTime,
 } from './agenda.model.js';
 
 export interface ClientDocument {
@@ -24,6 +25,13 @@ export interface ServiceDocument {
   _id: string;
   name: string;
   basePrice: number;
+  defaultTimeId?: string;
+  active: boolean;
+  createdAt: string;
+}
+export interface ServiceTimeDocument {
+  _id: string;
+  label: string;
   duration: number;  // Duración en HORAS (ej: 1.5 = 1 hora y 30 minutos)
   buffer: number;    // Tiempo de preparación en MINUTOS
   active: boolean;
@@ -34,6 +42,7 @@ export interface AppointmentDocument {
   clientId: string;
   manicuristId: string;
   serviceId: string;
+  timeId?: string;
   date: string;
   time: string;
   duration: number;  // Duración en HORAS (ej: 1.5 = 1 hora y 30 minutos)
@@ -68,6 +77,7 @@ export interface DocumentState {
   clientas: ClientDocument[];
   manicuristas: ManicuristDocument[];
   servicios: ServiceDocument[];
+  tiempos: ServiceTimeDocument[];
   citas: AppointmentDocument[];
   notificaciones: NoticeDocument[];
   disenos: DesignDocument[];
@@ -76,6 +86,7 @@ export const COLLECTIONS = [
   'clientas',
   'manicuristas',
   'servicios',
+  'tiempos',
   'citas',
   'notificaciones',
   'disenos',
@@ -93,6 +104,7 @@ export function fromDocuments(d: DocumentState): AgendaState {
     ...rest,
   }));
   const services: Service[] = d.servicios.map(({ _id, ...rest }) => ({ id: _id, ...rest }));
+  const times: ServiceTime[] = d.tiempos.map(({ _id, ...rest }) => ({ id: _id, ...rest }));
   const appointments: Appointment[] = d.citas.map(({ _id, ...rest }) => ({
     id: _id,
     ...rest,
@@ -109,7 +121,7 @@ export function fromDocuments(d: DocumentState): AgendaState {
   const notices: Notice[] = d.notificaciones
     .map(({ _id, ...rest }) => ({ id: _id, ...rest }))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  return { clients, manicurists, services, appointments, designs, notices };
+  return { clients, manicurists, services, times, appointments, designs, notices };
 }
 
 // Explicit projections keep display-only names and frontend IDs out of stored documents.
@@ -131,16 +143,24 @@ export function toDocuments(s: AgendaState): DocumentState {
       _id: x.id,
       name: x.name,
       basePrice: x.basePrice,
-      duration: x.duration,
-      buffer: x.buffer,
+      ...(x.defaultTimeId ? { defaultTimeId: x.defaultTimeId } : {}),
       active: x.active,
       createdAt: x.createdAt!,
+    })),
+    tiempos: s.times.map((t) => ({
+      _id: t.id,
+      label: t.label,
+      duration: t.duration,
+      buffer: t.buffer,
+      active: t.active,
+      createdAt: t.createdAt!,
     })),
     citas: s.appointments.map((a) => ({
       _id: a.id,
       clientId: a.clientId!,
       manicuristId: a.manicuristId,
       serviceId: a.serviceId,
+      ...(a.timeId ? { timeId: a.timeId } : {}),
       date: a.date,
       time: a.time,
       duration: a.duration,

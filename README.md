@@ -61,4 +61,11 @@ En Render selecciona Root Directory `backend`, construcción `npm ci --include=d
 
 El alcance sigue siendo una agenda compartida de demostración sin autenticación. Solo datos ficticios; no se procesa dinero ni se envían mensajes automáticamente.
 
-La versión actual utiliza las seis colecciones y conserva `agenda` sin migrarla ni sobrescribirla. Consulta `../docs/COMPROBAR_ATLAS.md`. La colección interna `_control` coordina los comandos simultáneos.
+La versión actual utiliza las siete colecciones (incluida `bitacora` para el experimento EXP01) y conserva `agenda` sin migrarla ni sobrescribirla. Consulta `../docs/COMPROBAR_ATLAS.md`. La colección interna `_control` coordina los comandos simultáneos.
+
+## Experimento EXP01
+
+- `src/domain/scenarios.ts`: estados iniciales deterministas T1–T4 (fecha fija `2026-11-25`, IDs como `cita-T3-C01`).
+- `src/domain/agenda.actions.ts`: comando `reset-scenario` (borra las colecciones de demostración y carga el escenario) y asentado de eventos en la bitácora (`appendLogEntry`, máximo 500 entradas).
+- `src/domain/documents.ts`: documentos de la colección `bitacora`.
+- El comando `reset-scenario` pasa por `/api/command` y el bloqueo de `_control`; los rechazos por traslape también se asentan como `intento-rechazado` en la bitácora. `/api/state` devuelve además `log` y `scenario`.

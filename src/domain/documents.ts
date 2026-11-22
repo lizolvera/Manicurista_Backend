@@ -1,6 +1,7 @@
 import type {
   AgendaState,
   Appointment,
+  BitacoraEntry,
   Client,
   Design,
   Manicurist,
@@ -73,6 +74,15 @@ export interface DesignDocument {
   note: string;
   createdAt: string;
 }
+export interface BitacoraDocument {
+  _id: string;
+  timestamp: string;
+  scenario: string;
+  action: string;
+  appointmentId: string;
+  result: 'ok' | 'error';
+  message: string;
+}
 export interface DocumentState {
   clientas: ClientDocument[];
   manicuristas: ManicuristDocument[];
@@ -81,6 +91,7 @@ export interface DocumentState {
   citas: AppointmentDocument[];
   notificaciones: NoticeDocument[];
   disenos: DesignDocument[];
+  bitacora: BitacoraDocument[];
 }
 export const COLLECTIONS = [
   'clientas',
@@ -90,6 +101,7 @@ export const COLLECTIONS = [
   'citas',
   'notificaciones',
   'disenos',
+  'bitacora',
 ] as const;
 
 export function fromDocuments(d: DocumentState): AgendaState {
@@ -121,7 +133,19 @@ export function fromDocuments(d: DocumentState): AgendaState {
   const notices: Notice[] = d.notificaciones
     .map(({ _id, ...rest }) => ({ id: _id, ...rest }))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  return { clients, manicurists, services, times, appointments, designs, notices };
+  const log: BitacoraEntry[] = d.bitacora.map(({ _id, ...rest }) => ({ id: _id, ...rest }));
+  return {
+    clients,
+    manicurists,
+    services,
+    times,
+    appointments,
+    designs,
+    notices,
+    log,
+    // El escenario activo es el del restablecimiento más reciente en la bitácora.
+    scenario: log.find((e) => e.action === 'restablecer-escenario')?.scenario ?? '',
+  };
 }
 
 // Explicit projections keep display-only names and frontend IDs out of stored documents.
@@ -190,6 +214,15 @@ export function toDocuments(s: AgendaState): DocumentState {
       image: d.image,
       note: d.note,
       createdAt: d.createdAt,
+    })),
+    bitacora: s.log.map((e) => ({
+      _id: e.id,
+      timestamp: e.timestamp,
+      scenario: e.scenario,
+      action: e.action,
+      appointmentId: e.appointmentId,
+      result: e.result,
+      message: e.message,
     })),
   };
 }

@@ -10,6 +10,7 @@ import {
   conflicts,
   migrateState,
 } from '../src/domain/agenda.model.js';
+import { SCENARIO_DATE } from '../src/domain/scenarios.js';
 import { AgendaInputError } from '../src/services/agenda.service.js';
 import {
   COLLECTIONS,
@@ -81,6 +82,8 @@ const empty = (): AgendaState => ({
       createdAt: '2026-11-09T18:00:00Z',
     },
   ],
+  log: [],
+  scenario: '',
 });
 const apply = (state: AgendaState, command: AgendaCommand) =>
   applyCommand(state, command, randomUUID, () => new Date().toISOString());
@@ -143,6 +146,14 @@ test('el repositorio persiste por colección, conserva agenda y revierte una ope
         data.set(name, [...rows.filter((r) => r._id !== filter._id), structuredClone(row)]);
         return { modifiedCount: 1 };
       },
+      deleteOne: async (filter: { _id: string }, options: { session: unknown }) => {
+        assert.equal(options.session, session);
+        assert.ok(COLLECTIONS.includes(name as (typeof COLLECTIONS)[number]));
+        const rows = data.get(name) || [];
+        const removed = rows.filter((r) => r._id === filter._id).length;
+        data.set(name, rows.filter((r) => r._id !== filter._id));
+        return { deletedCount: removed };
+      },
     }),
   };
   const client = { withSession: async <T>(run: (s: unknown) => Promise<T>) => run(session) };
@@ -185,10 +196,25 @@ test('el repositorio persiste por colección, conserva agenda y revierte una ope
       }),
     /horario/,
   );
-  assert.deepEqual(data, before);
+  // El intento rechazado queda asentado en la bitácora, pero la agenda no cambia.
+  assert.deepEqual(data.get('citas'), before.get('citas'));
   assert.deepEqual(data.get('agenda'), [
     { _id: 'demo', appointments: [{ id: 'anterior' }], revision: 7 },
   ]);
+  assert.ok(
+    data.get('bitacora')!.some((r) => r.action === 'intento-rechazado' && r.result === 'error'),
+  );
+  // reset-scenario borra la demostración y carga el escenario con ids deterministas.
+  await service.command({ action: 'reset-scenario', payload: { scenario: 'T1' } });
+  assert.equal(data.get('citas')!.length, 0);
+  assert.ok(data.get('tiempos')!.some((r) => r._id === 'tiempo-045'));
+  assert.ok(data.get('clientas')!.some((r) => r._id === 'clienta-C01'));
+  const afterReset = await service.read();
+  assert.equal(afterReset.scenario, 'T1');
+  assert.equal(afterReset.appointments.length, 0);
+  assert.ok(
+    afterReset.log.some((e) => e.action === 'restablecer-escenario' && e.scenario === 'T1'),
+  );
 });
 
 test('lee los siete ejemplos manuales y escribe exactamente sus campos de Atlas', () => {
@@ -403,6 +429,72 @@ test('backend permite reprogramar y cancelar liberando el horario', () => {
   });
   assert.equal(conflicts(appointment({ id: 'a2', time: '12:00' }), state.appointments), false);
   assert.equal(state.notices[0].kind, 'cancel');
+});
+
+test('escenarios EXP01: T1 vacío, T3/T4 con su cita exacta, reset idempotente y traslape rechazado', () => {
+  const scenAppt = (changes: Partial<Appointment> = {}): Appointment => ({
+    ...appointment(),
+    manicuristId: 'manicurista-001',
+    serviceId: 'servicio-001',
+    timeId: 'tiempo-045',
+    duration: 0.75,
+    buffer: 15,
+    date: SCENARIO_DATE,
+    totalPrice: 350,
+    ...changes,
+  });
+  let state = apply(empty(), { action: 'reset-scenario', payload: { scenario: 'T1' } });
+  assert.equal(state.scenario, 'T1');
+  assert.equal(state.appointments.length, 0);
+  assert.ok(
+    state.log.some((e) => e.action === 'restablecer-escenario' && e.scenario === 'T1' && e.result === 'ok'),
+  );
+
+  const t3 = apply(empty(), { action: 'reset-scenario', payload: { scenario: 'T3' } });
+  assert.deepEqual(
+    t3.appointments.map((a) => [a.id, a.client, a.date, a.time, a.duration, a.buffer, a.timeId]),
+    [['cita-T3-C01', 'C01', SCENARIO_DATE, '09:00', 0.75, 15, 'tiempo-045']],
+  );
+  const t3again = apply(t3, { action: 'reset-scenario', payload: { scenario: 'T3' } });
+  assert.deepEqual(t3again.appointments, t3.appointments); // idempotente
+
+  const t4 = apply(empty(), { action: 'reset-scenario', payload: { scenario: 'T4' } });
+  assert.deepEqual(
+    t4.appointments.map((a) => [a.id, a.time]),
+    [['cita-T4-C01', '10:00']],
+  );
+  // Traslape 10:30–11:15 contra 10:00–11:00 se rechaza; 11:00–12:00 queda libre.
+  assert.throws(
+    () =>
+      apply(t4, {
+        action: 'save',
+        payload: scenAppt({ id: 'cita-T4-C02', client: 'C02', clientId: 'clienta-C02', time: '10:30' }),
+      }),
+    /horario/,
+  );
+  assert.equal(
+    conflicts(
+      scenAppt({ id: 'cita-T4-C02b', client: 'C02', clientId: 'clienta-C02', time: '11:00' }),
+      t4.appointments,
+    ),
+    false,
+  );
+  // La bitácora registra guardar y reprogramar con marca de tiempo.
+  let s = apply(t4, {
+    action: 'save',
+    payload: scenAppt({ id: 'cita-T4-C02', client: 'C02', clientId: 'clienta-C02', time: '11:00' }),
+  });
+  assert.ok(s.log.some((e) => e.action === 'guardar-cita' && e.appointmentId === 'cita-T4-C02' && e.result === 'ok'));
+  assert.ok(s.log[0].timestamp.length > 0);
+  s = apply(s, {
+    action: 'save',
+    payload: { ...s.appointments.find((a) => a.id === 'cita-T4-C02')!, time: '12:00' },
+  });
+  assert.ok(s.log.some((e) => e.action === 'reprogramar-cita' && e.appointmentId === 'cita-T4-C02'));
+  assert.throws(
+    () => apply(empty(), { action: 'reset-scenario', payload: { scenario: 'T9' as never } }),
+    /Escenario inválido/,
+  );
 });
 
 test('backend conserva perfiles y datos anteriores durante la migración', () => {

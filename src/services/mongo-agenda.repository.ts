@@ -57,12 +57,20 @@ export class MongoAgendaRepository implements AgendaRepository {
           const stored = toDocuments(next);
           for (const name of COLLECTIONS) {
             const old = new Map<string, unknown>(baseline[name].map((row) => [row._id, row]));
+            const next = new Set(stored[name].map((row) => row._id));
             for (const row of stored[name]) {
-              // Domain operations never delete records. Only new or changed documents are written.
+              // New or changed documents are written; only reset-scenario removes rows.
               if (JSON.stringify(old.get(row._id)) !== JSON.stringify(row)) {
                 await this.db
                   .collection<{ _id: string }>(name)
                   .replaceOne({ _id: row._id }, row, { upsert: true, session });
+              }
+            }
+            for (const row of baseline[name]) {
+              if (!next.has(row._id)) {
+                await this.db
+                  .collection<{ _id: string }>(name)
+                  .deleteOne({ _id: row._id }, { session });
               }
             }
           }
